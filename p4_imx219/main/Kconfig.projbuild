@@ -1,0 +1,162 @@
+menu "Example Configuration"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "myssid"
+        help
+            SSID (Network Name) for the example to connect to.
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default "mypassword"
+        help
+            WiFi Password for the example to connect to.
+
+    config BLIMP_COMMAND_PORT
+        int "BlimpSoftware UDP command/telemetry port"
+        default 5004
+
+    config BLIMP_VIDEO_PORT
+        int "BlimpSoftware UDP JPEG port"
+        default 5005
+
+    config BLIMP_LEFT_ESC_GPIO
+        int "Left ESC GPIO"
+        default 29
+
+    config BLIMP_RIGHT_ESC_GPIO
+        int "Right ESC GPIO"
+        default 28
+
+    config BLIMP_LEFT_TILT_GPIO
+        int "Left tilt servo GPIO"
+        default 5
+
+    config BLIMP_RIGHT_TILT_GPIO
+        int "Right tilt servo GPIO"
+        default 4
+
+    config BLIMP_LEFT_MOTOR_INVERTED
+        bool "Reverse left motor output"
+        default y
+
+    config BLIMP_RIGHT_MOTOR_INVERTED
+        bool "Reverse right motor output"
+        default n
+
+    config BLIMP_LEFT_ESC_NEUTRAL_US
+        int "Left ESC neutral pulse (microseconds)"
+        range 1400 1600
+        default 1500
+        help
+            Pulse that completely stops the left ESC. This calibrated neutral
+            is also used by E-stop and the command watchdog.
+
+    config BLIMP_RIGHT_ESC_NEUTRAL_US
+        int "Right ESC neutral pulse (microseconds)"
+        range 1400 1600
+        default 1500
+        help
+            Pulse that completely stops the right ESC. This calibrated neutral
+            is also used by E-stop and the command watchdog.
+
+    config BLIMP_LEFT_MOTOR_FORWARD_SCALE_PERCENT
+        int "Left motor forward scale (percent)"
+        range 0 100
+        default 100
+        help
+            Scale logical forward commands for the left motor. This is applied
+            before motor reversal, so forward always means blimp forward.
+
+    config BLIMP_LEFT_MOTOR_REVERSE_SCALE_PERCENT
+        int "Left motor reverse scale (percent)"
+        range 0 100
+        default 100
+        help
+            Scale logical reverse commands for the left motor. This is applied
+            before motor reversal, so reverse always means blimp reverse.
+
+    config BLIMP_RIGHT_MOTOR_FORWARD_SCALE_PERCENT
+        int "Right motor forward scale (percent)"
+        range 0 100
+        default 100
+        help
+            Scale logical forward commands for the right motor. This is applied
+            before motor reversal, so forward always means blimp forward.
+
+    config BLIMP_RIGHT_MOTOR_REVERSE_SCALE_PERCENT
+        int "Right motor reverse scale (percent)"
+        range 0 100
+        default 100
+        help
+            Scale logical reverse commands for the right motor. This is applied
+            before motor reversal, so reverse always means blimp reverse.
+
+    config BLIMP_LEFT_SERVO_INVERTED
+        bool "Reverse left tilt servo output"
+        default y
+
+    config BLIMP_RIGHT_SERVO_INVERTED
+        bool "Reverse right tilt servo output"
+        default n
+
+    config BLIMP_LEFT_SERVO_NEUTRAL_ANGLE
+        int "Left tilt servo neutral angle (degrees)"
+        range 1 179
+        default 90
+        help
+            Physical servo output angle used when the logical tilt command is
+            neutral (90 degrees). Endpoints remain 0 and 180 degrees.
+
+    config BLIMP_RIGHT_SERVO_NEUTRAL_ANGLE
+        int "Right tilt servo neutral angle (degrees)"
+        range 1 179
+        default 90
+        help
+            Physical servo output angle used when the logical tilt command is
+            neutral (90 degrees). Endpoints remain 0 and 180 degrees.
+
+    config BLIMP_IMU_SCL_GPIO
+        int "MPU6050 SCL GPIO"
+        default 8
+
+    config BLIMP_IMU_SDA_GPIO
+        int "MPU6050 SDA GPIO"
+        default 7
+
+    config BLIMP_IMU_POWER_GPIO
+        int "MPU6050 power-enable GPIO (-1 when powered from 3.3 V)"
+        range -1 54
+        default -1
+
+    config BLIMP_IMU_ZERO_AT_STARTUP
+        bool "Zero roll and pitch at startup"
+        default y
+        help
+            Treat the attitude measured immediately after the stationary gyro
+            calibration as level (zero roll and zero pitch). Keep the blimp in
+            its desired reference attitude during startup.
+
+    choice BLIMP_IMU_TILT_AXIS_MAPPING
+        prompt "IMU left/right and up/down tilt-axis mapping"
+        default BLIMP_IMU_AXES_SWAPPED
+        help
+            Select how the MPU6050 board's native roll and pitch axes map to
+            the blimp attitude shown by the basestation.
+
+        config BLIMP_IMU_AXES_NATIVE
+            bool "Native: left/right = sensor roll, up/down = sensor pitch"
+
+        config BLIMP_IMU_AXES_SWAPPED
+            bool "Swapped: left/right = sensor pitch, up/down = sensor roll"
+    endchoice
+
+    config BLIMP_IMU_INVERT_ROLL
+        bool "Invert displayed left/right tilt"
+        default n
+
+    config BLIMP_IMU_INVERT_PITCH
+        bool "Invert displayed up/down tilt"
+        default n
+
+endmenu

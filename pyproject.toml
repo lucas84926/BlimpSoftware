@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blimpsoftware"
+version = "0.1.0"
+description = "Minimal Wi-Fi teleoperation base station for an ESP32 blimp"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.110", "pygame>=2.5", "uvicorn[standard]>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+"Original RoverSoftware" = "https://github.com/NEXT-Competition/RoverSoftware"
+
+[project.scripts]
+blimpsoftware-basestation = "run_basestation:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["robot", "basestation", "run_basestation.py"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["robot", "basestation", "p4_imx219", "docs", "tests",
+  "basestation-ui/src",
+  "basestation-ui/server", "basestation-ui/public", "basestation-ui/package.json",
+  "basestation-ui/package-lock.json", "basestation-ui/deno.json",
+  "basestation-ui/deno.lock",
+  "basestation-ui/tsconfig.json", "basestation-ui/vite.config.ts",
+  "basestation-ui/index.html", "run_basestation.py", "requirements.txt",
+  "README.md"]
+exclude = ["**/__pycache__", "**/*.pyc", "p4_imx219/build*",
+  "p4_imx219/managed_components", "p4_imx219/sdkconfig",
+  "p4_imx219/sdkconfig.old"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
