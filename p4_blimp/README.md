@@ -1,4 +1,4 @@
-# BlimpSoftware firmware: ESP32-P4 + ESP32-C6 + IMX219
+# BlimpSoftware firmware: ESP32-P4 + ESP32-C6 + IMX219/OV5647
 
 This is the primary aircraft firmware for the Waveshare ESP32-P4-WiFi6 board. The P4 runs camera processing, flight I/O, the MPU6050 attitude estimator, and the BlimpSoftware protocol. Its companion ESP32-C6 supplies 2.4 GHz Wi-Fi through ESP-Hosted over the board's internal SDIO connection.
 
@@ -13,7 +13,7 @@ The firmware is currently teleoperation-only. It controls one blimp with two bid
 - PS4-derived arcade-drive commands from the Python base station;
 - UDP NDJSON control, telemetry, ping, and pong messages;
 - 10 Hz MPU6050 roll, pitch, and integrated-yaw telemetry;
-- IMX219 RAW10 capture, software demosaic, hardware JPEG encoding, and UDP video;
+- IMX219 RAW10 or OV5647 RAW8 capture, software demosaic, hardware JPEG encoding, and UDP video;
 - standalone HTTP camera diagnostics and exposure/color controls;
 - automatic discovery of the base-station return address from received commands.
 
@@ -27,11 +27,11 @@ These are the project defaults and the currently tested arrangement. Confirm the
 | Right ESC signal | 28 | LEDC channel 2, 50 Hz |
 | Left tilt servo signal | 5 | LEDC channel 3, 50 Hz |
 | Right tilt servo signal | 4 | LEDC channel 4, 50 Hz |
-| IMX219 SCCB SDA | 7 | Shared I2C bus, camera address `0x10` |
+| Camera SCCB SDA | 7 | Shared I2C bus; IMX219 `0x10`, OV5647 `0x36` |
 | MPU6050 SDA | 7 | Shared I2C bus, address `0x68` or `0x69` |
-| IMX219 SCCB SCL | 8 | Shared I2C bus, 100 kHz |
+| Camera SCCB SCL | 8 | Shared I2C bus, 100 kHz |
 | MPU6050 SCL | 8 | Shared I2C bus, 100 kHz |
-| IMX219 XCLK | 20 | 24 MHz LEDC clock |
+| Camera XCLK | 20 or module | IMX219 default: GPIO20; OV5647 default: module-provided |
 | MPU6050 VCC | 3.3 V | External power; power-enable GPIO is `-1` |
 | MPU6050 GND | GND | Ground must be shared with the P4 |
 
@@ -84,14 +84,14 @@ See [the repository protocol reference](../docs/PROTOCOL.md) for message fields 
 
 | Setting | Current value |
 |---|---|
-| Sensor | Sony IMX219, MIPI CSI |
-| Sensor capture | 1536 x 1232 RAW10 |
-| Bayer interpretation | RGGB |
+| Sensor | Sony IMX219 or OmniVision OV5647, MIPI CSI |
+| Sensor capture | IMX219: 1536 x 1232 RAW10; OV5647: 800 x 800 RAW8 |
+| Bayer interpretation | IMX219: RGGB; OV5647: GBRG |
 | Flight output | 480 x 384 RGB565 |
 | JPEG encoder | ESP32-P4 hardware encoder |
 | Chroma sampling | YUV 4:2:2 |
 | JPEG quality | 65 |
-| XCLK | 24 MHz on GPIO20 |
+| XCLK | IMX219: 24 MHz on GPIO20; OV5647 default: supplied by module |
 | SCCB | 100 kHz on shared GPIO7/8 bus |
 | Frame buffers | Two V4L2 capture buffers |
 | HTTP frame queue | One, newest frame wins |
@@ -101,12 +101,11 @@ The conversion loop uses precomputed source offsets, RGB565 output, and `-O2`. W
 
 Open `http://<P4-IP>/` for the diagnostic page. It provides runtime controls for:
 
-- IMX219 analog gain;
-- sensor exposure time;
+- IMX219 analog gain and sensor exposure time (ignored by the OV5647 build);
 - software digital brightness;
 - software red and blue white-balance gains.
 
-The raw sensor mode and output size are compile-time constants in `main/main.c`. JPEG quality is in `main/jpeg_enc.c`.
+Select the sensor under **Example Configuration > Camera sensor**. The raw modes and 480 x 384 flight output are compile-time settings in `main/main.c`. JPEG quality is in `main/jpeg_enc.c`.
 
 ## MPU6050 behavior
 
@@ -127,6 +126,8 @@ Run `idf.py -B build-local menuconfig`, then open **Example Configuration**.
 
 | Option | Default | Description |
 |---|---:|---|
+| Camera sensor | IMX219 | Select the local IMX219 or Espressif OV5647 driver |
+| Camera XCLK GPIO | 20 | Defaults to -1 (module-provided clock) for OV5647 |
 | Wi-Fi SSID | `myssid` | 2.4 GHz network name |
 | Wi-Fi password | `mypassword` | WPA2/WPA3 network password |
 | Command/telemetry port | 5004 | UDP NDJSON socket |
@@ -180,7 +181,7 @@ The tracked `sdkconfig.defaults` provides the reference-board, actuator, and IMU
 Activate ESP-IDF, then:
 
 ```bash
-cd p4_imx219
+cd p4_blimp
 idf.py menuconfig
 idf.py build
 idf.py flash monitor

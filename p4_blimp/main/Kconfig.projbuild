@@ -1,5 +1,30 @@
 menu "Example Configuration"
 
+    choice BLIMP_CAMERA_SENSOR
+        prompt "Camera sensor"
+        default BLIMP_CAMERA_IMX219
+        help
+            Select the MIPI-CSI camera fitted to this blimp. This is a
+            compile-time choice; rebuild and flash after changing it.
+
+        config BLIMP_CAMERA_IMX219
+            bool "Sony IMX219 (local driver)"
+
+        config BLIMP_CAMERA_OV5647
+            bool "OmniVision OV5647 (Espressif driver)"
+            select CAMERA_OV5647
+            select CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR
+    endchoice
+
+    config BLIMP_CAMERA_XCLK_GPIO
+        int "Camera XCLK GPIO (-1 for module-provided clock)"
+        range -1 54
+        default 20 if BLIMP_CAMERA_IMX219
+        default -1 if BLIMP_CAMERA_OV5647
+        help
+            IMX219 on the tested carrier needs 24 MHz on GPIO20. The tested
+            OV5647 setup supplies its own clock and therefore uses -1.
+
     config ESP_WIFI_SSID
         string "WiFi SSID"
         default "myssid"

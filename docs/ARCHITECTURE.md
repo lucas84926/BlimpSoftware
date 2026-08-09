@@ -45,7 +45,7 @@ inspect.
 
 ### Video
 
-1. IMX219 captures 1536 x 1232 RAW10 over MIPI CSI.
+1. IMX219/OV5647 captures 1536 x 1232 RAW10/800 x 800 RAW8 over MIPI CSI.
 2. The P4 downsamples and demosaics RGGB into 480 x 384 RGB565.
 3. The hardware JPEG unit encodes YUV 4:2:2 at quality 65.
 4. Each JPEG is split into MTU-sized UDP packets and sent to port 5005.
@@ -71,7 +71,7 @@ components. Their priorities and stacks use component configuration defaults.
 
 ## Resource ownership
 
-- One I2C master owns GPIO7/8. Both IMX219 SCCB (`0x10`) and MPU6050
+- One I2C master owns GPIO7/8. Both camera SCCB (`0x10`) and MPU6050
   (`0x68`/`0x69`) use the same bus handle.
 - LEDC timer 0/channel 0 generates the camera XCLK.
 - LEDC timer 1/channels 1–4 generate ESC and servo pulses.

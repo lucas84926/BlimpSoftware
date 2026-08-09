@@ -7,7 +7,9 @@
 #include <linux/videodev2.h>
 
 #include "esp_log.h"
+#if CONFIG_BLIMP_CAMERA_IMX219
 #include "imx219.h"
+#endif
 #include "esp_video_init.h"
 #include "esp_video_ioctl.h"
 #include "esp_video_device.h"
@@ -36,12 +38,23 @@ static i2c_master_bus_handle_t s_sensor_bus;
 #define I2C_MASTER_SDA_IO           7
 #define I2C_MASTER_NUM              0
 #define I2C_MASTER_FREQ_HZ          100000
-#define XCLK_PIN                    20
 #define XCLK_FREQ_HZ                24000000
 
 // Sensor Input & Output Settings
+#if CONFIG_BLIMP_CAMERA_IMX219
 #define IMG_WIDTH  1536
 #define IMG_HEIGHT 1232
+#define CAMERA_PIXEL_FORMAT V4L2_PIX_FMT_SBGGR10
+#define CAMERA_NAME "IMX219"
+#else
+#define IMG_WIDTH  800
+#define IMG_HEIGHT 800
+// esp_video 1.4.x exposes every sensor-native RAW8 stream through its
+// generic SBGGR8 fourcc. The OV5647's actual Bayer order remains GBRG and is
+// handled as such by demosaic_gbrg_to_rgb565().
+#define CAMERA_PIXEL_FORMAT V4L2_PIX_FMT_SBGGR8
+#define CAMERA_NAME "OV5647"
+#endif
 
 #define OUT_WIDTH  480
 #define OUT_HEIGHT 384
@@ -60,9 +73,10 @@ typedef struct {
 
 static QueueHandle_t s_jpeg_queue = NULL;
 
-// Helper to access sensor device from controls
-extern esp_cam_sensor_device_t *s_sensor_dev; 
+#if CONFIG_BLIMP_CAMERA_IMX219
+// The local IMX219 driver exposes its device for its sensor-specific controls.
 static esp_cam_sensor_device_t *s_sensor = NULL;
+#endif
 
 static int s_digital_gain = 255; // Max
 static int s_wb_red = 140;       // ~1.1x Red Gain (Base 128)
@@ -74,6 +88,7 @@ static int *s_y_lut = NULL;
 // XCLK Generation
 static void enable_xclk(void)
 {
+#if CONFIG_BLIMP_CAMERA_XCLK_GPIO >= 0
     ledc_timer_config_t ledc_timer = {
         .duty_resolution = LEDC_TIMER_1_BIT, 
         .freq_hz = XCLK_FREQ_HZ,
@@ -86,13 +101,16 @@ static void enable_xclk(void)
     ledc_channel_config_t ledc_channel = {
         .channel    = LEDC_CHANNEL_0,
         .duty       = 1, 
-        .gpio_num   = XCLK_PIN,
+        .gpio_num   = CONFIG_BLIMP_CAMERA_XCLK_GPIO,
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .hpoint     = 0,
         .timer_sel  = LEDC_TIMER_0,
     };
     if (ledc_channel_config(&ledc_channel) != ESP_OK) ESP_LOGE(TAG, "Failed to config LEDC channel");
-    ESP_LOGI(TAG, "Enabled XCLK on GPIO %d at %d Hz", XCLK_PIN, XCLK_FREQ_HZ);
+    ESP_LOGI(TAG, "Enabled XCLK on GPIO %d at %d Hz", CONFIG_BLIMP_CAMERA_XCLK_GPIO, XCLK_FREQ_HZ);
+#else
+    ESP_LOGI(TAG, "Camera XCLK is supplied by the camera module");
+#endif
 }
 
 // Wi-Fi Connection
@@ -172,12 +190,14 @@ static esp_err_t control_handler(httpd_req_t *req) {
     if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
         char val_str[10];
         if (httpd_query_key_value(buf, "gain", val_str, sizeof(val_str)) == ESP_OK) {
-            int val = atoi(val_str);
-            if (s_sensor) imx219_set_gain(s_sensor, val);
+#if CONFIG_BLIMP_CAMERA_IMX219
+            if (s_sensor) imx219_set_gain(s_sensor, atoi(val_str));
+#endif
         }
         if (httpd_query_key_value(buf, "exposure", val_str, sizeof(val_str)) == ESP_OK) {
-            int val = atoi(val_str);
-            if (s_sensor) imx219_set_exposure(s_sensor, val);
+#if CONFIG_BLIMP_CAMERA_IMX219
+            if (s_sensor) imx219_set_exposure(s_sensor, atoi(val_str));
+#endif
         }
         if (httpd_query_key_value(buf, "digital", val_str, sizeof(val_str)) == ESP_OK) {
             s_digital_gain = atoi(val_str);
@@ -261,14 +281,23 @@ static void init_demosaic_luts(int width, int height) {
     
     for (int y = 0; y < OUT_HEIGHT; y++) {
         int src_y = ((y * height) / OUT_HEIGHT) & ~1;
+#if CONFIG_BLIMP_CAMERA_IMX219
         s_y_lut[y] = src_y * (width * 5 / 4);
+#else
+        s_y_lut[y] = src_y * width;
+#endif
     }
     for (int x = 0; x < OUT_WIDTH; x++) {
         int src_x = ((x * width) / OUT_WIDTH) & ~1;
+#if CONFIG_BLIMP_CAMERA_IMX219
         s_x_lut[x] = (src_x >> 2) * 5 + (src_x & 3);
+#else
+        s_x_lut[x] = src_x;
+#endif
     }
 }
 
+#if CONFIG_BLIMP_CAMERA_IMX219
 static void demosaic_rggb_to_rgb565(const uint8_t *raw10, uint16_t *rgb) {
     const int raw_stride = IMG_WIDTH * 5 / 4;
     const uint32_t r_gain = (s_digital_gain * s_wb_red) >> 7;
@@ -292,6 +321,31 @@ static void demosaic_rggb_to_rgb565(const uint8_t *raw10, uint16_t *rgb) {
         }
     }
 }
+#endif
+
+#if CONFIG_BLIMP_CAMERA_OV5647
+static void demosaic_gbrg_to_rgb565(const uint8_t *raw8, uint16_t *rgb) {
+    const uint32_t r_gain = (s_digital_gain * s_wb_red) >> 7;
+    const uint32_t g_gain = s_digital_gain;
+    const uint32_t b_gain = (s_digital_gain * s_wb_blue) >> 7;
+    for (int y = 0; y < OUT_HEIGHT; y++) {
+        const uint8_t *row0 = raw8 + s_y_lut[y];
+        const uint8_t *row1 = row0 + IMG_WIDTH;
+        uint16_t *dst = rgb + (OUT_HEIGHT - 1 - y) * OUT_WIDTH + OUT_WIDTH - 1;
+        for (int x = 0; x < OUT_WIDTH; x++, dst--) {
+            int col = s_x_lut[x];
+            // OV5647 RAW8 is GBRG: G B on the even row, R G on the odd row.
+            uint32_t r = (row1[col] * r_gain) >> 7;
+            uint32_t g = (((uint32_t)row0[col] + row1[col + 1]) * g_gain) >> 8;
+            uint32_t b = (row0[col + 1] * b_gain) >> 7;
+            if (r > 255) r = 255;
+            if (g > 255) g = 255;
+            if (b > 255) b = 255;
+            *dst = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        }
+    }
+}
+#endif
 
 void app_main(void) {
     esp_log_level_set("*", ESP_LOG_INFO);
@@ -343,7 +397,9 @@ void app_main(void) {
     // Camera Init
     enable_xclk();
     vTaskDelay(pdMS_TO_TICKS(50));
+#if CONFIG_BLIMP_CAMERA_IMX219
     imx219_force_link();
+#endif
 
     esp_video_init_csi_config_t csi_config = {
         .sccb_config = {
@@ -365,6 +421,19 @@ void app_main(void) {
     int fd = open(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, O_RDWR);
     if (fd < 0) return;
 
+    // Select the sensor-native format before allocating capture buffers.
+    struct v4l2_format fmt = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .fmt.pix.width = IMG_WIDTH,
+        .fmt.pix.height = IMG_HEIGHT,
+        .fmt.pix.pixelformat = CAMERA_PIXEL_FORMAT,
+    };
+    if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
+        ESP_LOGE(TAG, "Failed to set %s camera format: errno=%d", CAMERA_NAME, errno);
+        close(fd);
+        return;
+    }
+
     struct v4l2_requestbuffers req = {
         .count = 2,
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -372,7 +441,7 @@ void app_main(void) {
     };
     ioctl(fd, VIDIOC_REQBUFS, &req);
 
-    struct v4l2_buffer buf_q;
+    struct v4l2_buffer buf_q = {0};
     for (int i = 0; i < 2; i++) {
         buf_q.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf_q.memory = V4L2_MEMORY_MMAP;
@@ -380,29 +449,21 @@ void app_main(void) {
         ioctl(fd, VIDIOC_QBUF, &buf_q);
     }
 
-    // Set Format (RAW10)
-    struct v4l2_format fmt = {
-        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-        .fmt.pix.width = IMG_WIDTH,
-        .fmt.pix.height = IMG_HEIGHT,
-        .fmt.pix.pixelformat = V4L2_PIX_FMT_SBGGR10,
-    };
-    if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-        ESP_LOGE(TAG, "Failed to set format");
-    }
-
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     ioctl(fd, VIDIOC_STREAMON, &type);
 
-    ESP_LOGI(TAG, "Camera Started (RAW10 Mode). Streaming active...");
+    ESP_LOGI(TAG, "%s camera started (%dx%d, format=" V4L2_FMT_STR ")",
+             CAMERA_NAME, IMG_WIDTH, IMG_HEIGHT, V4L2_FMT_STR_ARG(CAMERA_PIXEL_FORMAT));
     
-    // Fetch global sensor device for controls
+#if CONFIG_BLIMP_CAMERA_IMX219
+    // Fetch global sensor device for IMX219 controls.
     s_sensor = imx219_get_global_dev();
     if (s_sensor) {
         ESP_LOGI(TAG, "Global Sensor Device Acquired: %p", s_sensor);
     } else {
         ESP_LOGE(TAG, "Global Sensor Device NOT Found!");
     }
+#endif
     
     struct v4l2_buffer buf_dq = {
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -426,10 +487,12 @@ void app_main(void) {
     if (!rgb_buf) ESP_LOGE(TAG, "Failed to alloc RGB565 buffer");
 
     // Set values for default exposure and gain
+#if CONFIG_BLIMP_CAMERA_IMX219
     if (s_sensor) {
         imx219_set_exposure(s_sensor, 110);
         imx219_set_gain(s_sensor, 232);
     }
+#endif
 
     while (1) {
         if (ioctl(fd, VIDIOC_DQBUF, &buf_dq) == 0) {
@@ -439,7 +502,11 @@ void app_main(void) {
             uint8_t *raw_data = (uint8_t*)mapped_bufs[buf_dq.index];
 
             if (rgb_buf) {
+#if CONFIG_BLIMP_CAMERA_IMX219
                 demosaic_rggb_to_rgb565(raw_data, rgb_buf);
+#else
+                demosaic_gbrg_to_rgb565(raw_data, rgb_buf);
+#endif
                 
                 // One JPEG feeds both low-latency UDP and the diagnostic web stream.
                 if (jpeg_enc_process(rgb_buf, OUT_WIDTH * OUT_HEIGHT * 2, OUT_WIDTH, OUT_HEIGHT,

@@ -6,7 +6,7 @@ The reference aircraft uses:
 
 - two thrust motors driven by ESCs
 - two motor-tilt servos
-- an IMX219 camera
+- an IMX219/OV5647 camera
 - an MPU6050 IMU
 - an ESP32-P4 with an ESP32-C6 for Wi-Fi
 
@@ -36,8 +36,8 @@ The system is designed around direct human control rather than autonomous flight
 
 ```text
 PS4 controller -> Python base station -> UDP/5004 -> ESP32-P4 flight control
-Browser UI     <- WebSocket/HTTP 8000 <- telemetry and ping/pong
-Camera view    <- MJPEG HTTP bridge   <- UDP/5005 JPEG fragments <- IMX219/P4
+Browser UI     <- WebSocket/HTTP 8000 <- Telemetry and ping/pong
+Camera view    <- MJPEG HTTP bridge   <- UDP/5005 JPEG fragments <- Camera/P4
                                            |
                                    ESP32-C6 Wi-Fi over SDIO
 ```
@@ -111,34 +111,34 @@ Open `http://localhost:5173`. Vite proxies the browser API to port 8001.
 
 ## ESP32-P4 firmware quick start
 
-The primary firmware is the ESP-IDF 5.4 project in [p4_imx219](p4_imx219/README.md). Its tested defaults are:
+The primary firmware is the ESP-IDF 5.4 project in [p4_blimp](p4_blimp/README.md). It supports menuconfig-selectable IMX219 and OV5647 cameras. Its tested defaults are:
 
 | Device | Connection |
 |---|---|
 | Left/right ESC | GPIO29 / GPIO28 |
 | Left/right tilt servo | GPIO5 / GPIO4 |
-| IMX219 + MPU6050 shared SDA | GPIO7 |
-| IMX219 + MPU6050 shared SCL | GPIO8 |
+| Camera + MPU6050 shared SDA | GPIO7 |
+| Camera + MPU6050 shared SCL | GPIO8 |
 | MPU6050 power | P4 3.3 V and GND |
-| IMX219 XCLK | GPIO20, 24 MHz |
+| Camera XCLK | GPIO20, 24 MHz |
 
 To start, activate ESP-IDF, then:
 
 ```bash
-cd p4_imx219
+cd p4_blimp
 idf.py menuconfig
 idf.py build
 idf.py flash monitor
 ```
 
 Settings for the blimp can be configured in the SDK Configuration Editor, under Example Configuration.
-The repository tracks sanitized defaults in `p4_imx219/sdkconfig.defaults`; the generated `p4_imx219/sdkconfig`, including real Wi-Fi credentials, is ignored.
+The repository tracks sanitized defaults in `p4_blimp/sdkconfig.defaults`; the generated `p4_blimp/sdkconfig`, including real Wi-Fi credentials, is ignored.
 
 Keep the aircraft still, at the attitude that should read as level, for the approximately one-second gyro calibration at boot. Startup roll/pitch zeroing is enabled by default. Native/swapped attitude axes and independent roll/pitch inversion are available under **Example Configuration**. Test motor direction, servo direction, failsafe, and E-stop with the propellers removed.
 
 Open `http://<P4-IP>/` for the camera settings page. It provides runtime controls for:
 
-- IMX219 analog gain;
+- camera analog gain;
 - sensor exposure time;
 - software digital brightness;
 - software red and blue white-balance gains.
@@ -170,4 +170,4 @@ Each control datagram contains one newline-terminated JSON object. The base stat
 - [System architecture](docs/ARCHITECTURE.md)
 - [Wire protocols](docs/PROTOCOL.md)
 - [P4 wiring, configuration, and bring-up](docs/P4_BRINGUP.md)
-- [Detailed P4 firmware reference](p4_imx219/README.md)
+- [Detailed P4 firmware reference](p4_blimp/README.md)

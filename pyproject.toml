@@ -23,7 +23,7 @@ blimpsoftware-basestation = "run_basestation:main"
 only-include = ["robot", "basestation", "run_basestation.py"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["robot", "basestation", "p4_imx219", "docs", "tests",
+only-include = ["robot", "basestation", "p4_blimp", "docs", "tests",
   "basestation-ui/src",
   "basestation-ui/server", "basestation-ui/public", "basestation-ui/package.json",
   "basestation-ui/package-lock.json", "basestation-ui/deno.json",
@@ -31,9 +31,9 @@ only-include = ["robot", "basestation", "p4_imx219", "docs", "tests",
   "basestation-ui/tsconfig.json", "basestation-ui/vite.config.ts",
   "basestation-ui/index.html", "run_basestation.py", "requirements.txt",
   "README.md"]
-exclude = ["**/__pycache__", "**/*.pyc", "p4_imx219/build*",
-  "p4_imx219/managed_components", "p4_imx219/sdkconfig",
-  "p4_imx219/sdkconfig.old"]
+exclude = ["**/__pycache__", "**/*.pyc", "p4_blimp/build*",
+  "p4_blimp/managed_components", "p4_blimp/sdkconfig",
+  "p4_blimp/sdkconfig.old"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

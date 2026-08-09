@@ -1,6 +1,6 @@
 # ESP32-P4 blimp bring-up
 
-This checklist covers the integrated P4+C6, IMX219, MPU6050, two-ESC, and two-servo build. For safety, perform initial actuator testing/calibration without propellers.
+This checklist covers the integrated P4+C6, IMX219/OV5647 camera sensor, MPU6050, two-ESC, and two-servo build. For safety, perform initial actuator testing/calibration without propellers.
 
 ## 1. Wiring
 
@@ -10,11 +10,11 @@ This checklist covers the integrated P4+C6, IMX219, MPU6050, two-ESC, and two-se
 | Right ESC signal | GPIO28 |
 | Left servo signal | GPIO5 |
 | Right servo signal | GPIO4 |
-| IMX219/MPU6050 SDA | GPIO7 / board `SDA` label |
-| IMX219/MPU6050 SCL | GPIO8 / board `SCL` label |
+| Camera/MPU6050 SDA | GPIO7 / board `SDA` label |
+| Camera/MPU6050 SCL | GPIO8 / board `SCL` label |
 | MPU6050 VCC | 3.3 V |
 | MPU6050 ground | GND |
-| IMX219 XCLK | GPIO20, normally routed by carrier |
+| Camera XCLK | GPIO20, normally routed by carrier |
 
 The IMU and camera share SDA/SCL. They coexist because their I2C addresses are different. They must share one software bus controller as well as the wires.
 
@@ -25,7 +25,7 @@ Use an external supply sized for the motors and servos. Connect its ground to th
 Activate ESP-IDF, then:
 
 ```bash
-cd p4_imx219
+cd p4_blimp
 idf.py menuconfig
 ```
 
@@ -127,7 +127,7 @@ Under **Example Configuration**, choose **Native** when sensor roll should be bl
 
 ### Camera colors are wrong
 
-The current module is interpreted as RGGB and converted to RGB565. A different IMX219 module or sensor flip setting can change Bayer phase. Red/blue reversal means the Bayer order should be checked before adjusting white balance.
+The current module is interpreted as RGGB and converted to RGB565. A different camera module or sensor flip setting can change Bayer phase. Red/blue reversal means the Bayer order should be checked before adjusting white balance.
 
 ### Motors move unexpectedly
 
