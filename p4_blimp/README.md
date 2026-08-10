@@ -128,6 +128,7 @@ Run `idf.py -B build-local menuconfig`, then open **Example Configuration**.
 |---|---:|---|
 | Camera sensor | IMX219 | Select the local IMX219 or Espressif OV5647 driver |
 | Camera XCLK GPIO | 20 | Defaults to -1 (module-provided clock) for OV5647 |
+| Rotate camera image 180 degrees | enabled | Correct an upside-down camera mounting in software |
 | Wi-Fi SSID | `myssid` | 2.4 GHz network name |
 | Wi-Fi password | `mypassword` | WPA2/WPA3 network password |
 | Command/telemetry port | 5004 | UDP NDJSON socket |
@@ -141,6 +142,7 @@ Run `idf.py -B build-local menuconfig`, then open **Example Configuration**.
 | Left/right ESC neutral | 1500 us | Per-ESC pulse that produces a complete stop |
 | Left motor forward/reverse scale | 100% / 100% | Logical direction compensation |
 | Right motor forward/reverse scale | 100% / 100% | Logical direction compensation |
+| Steering sensitivity | 50% | Scale differential steering without changing straight-line throttle |
 | Reverse left servo | enabled | Mirrored tilt correction |
 | Reverse right servo | disabled | Mirrored tilt correction |
 | Left/right servo neutral angle | 90 degrees | Physical output at logical 90 degrees |

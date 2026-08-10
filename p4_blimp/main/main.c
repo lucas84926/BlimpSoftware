@@ -56,8 +56,8 @@ static i2c_master_bus_handle_t s_sensor_bus;
 #define CAMERA_NAME "OV5647"
 #endif
 
-#define OUT_WIDTH  480
-#define OUT_HEIGHT 384
+#define OUT_WIDTH  800
+#define OUT_HEIGHT 480
 
 // Stream definition
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -306,8 +306,14 @@ static void demosaic_rggb_to_rgb565(const uint8_t *raw10, uint16_t *rgb) {
     for (int y = 0; y < OUT_HEIGHT; y++) {
         const uint8_t *row0 = raw10 + s_y_lut[y];
         const uint8_t *row1 = row0 + raw_stride;
+#if CONFIG_BLIMP_CAMERA_ROTATE_180
         uint16_t *dst = rgb + (OUT_HEIGHT - 1 - y) * OUT_WIDTH + OUT_WIDTH - 1;
-        for (int x = 0; x < OUT_WIDTH; x++, dst--) {
+        const int dst_step = -1;
+#else
+        uint16_t *dst = rgb + y * OUT_WIDTH;
+        const int dst_step = 1;
+#endif
+        for (int x = 0; x < OUT_WIDTH; x++, dst += dst_step) {
             int col = s_x_lut[x];
             // This IMX219 module delivers RGGB: R G on the even row, G B on
             // the odd row. Treating it as BGGR swaps red and blue in the JPEG.
@@ -331,8 +337,14 @@ static void demosaic_gbrg_to_rgb565(const uint8_t *raw8, uint16_t *rgb) {
     for (int y = 0; y < OUT_HEIGHT; y++) {
         const uint8_t *row0 = raw8 + s_y_lut[y];
         const uint8_t *row1 = row0 + IMG_WIDTH;
+#if CONFIG_BLIMP_CAMERA_ROTATE_180
         uint16_t *dst = rgb + (OUT_HEIGHT - 1 - y) * OUT_WIDTH + OUT_WIDTH - 1;
-        for (int x = 0; x < OUT_WIDTH; x++, dst--) {
+        const int dst_step = -1;
+#else
+        uint16_t *dst = rgb + y * OUT_WIDTH;
+        const int dst_step = 1;
+#endif
+        for (int x = 0; x < OUT_WIDTH; x++, dst += dst_step) {
             int col = s_x_lut[x];
             // OV5647 RAW8 is GBRG: G B on the even row, R G on the odd row.
             uint32_t r = (row1[col] * r_gain) >> 7;

@@ -182,14 +182,26 @@ void blimp_control_init(void)
              CONFIG_BLIMP_LEFT_MOTOR_REVERSE_SCALE_PERCENT,
              CONFIG_BLIMP_RIGHT_MOTOR_FORWARD_SCALE_PERCENT,
              CONFIG_BLIMP_RIGHT_MOTOR_REVERSE_SCALE_PERCENT);
+    ESP_LOGI(TAG, "Steering sensitivity: %d%%",
+             CONFIG_BLIMP_STEERING_SENSITIVITY_PERCENT);
 }
 
 void blimp_control_set(float left, float right, float left_tilt, float right_tilt)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (!s_output.estop) {
-        s_output.left = clampf(left, -1, 1);
-        s_output.right = clampf(right, -1, 1);
+        left = clampf(left, -1, 1);
+        right = clampf(right, -1, 1);
+
+        // Recover the arcade-drive components from the basestation's mixed
+        // motor commands, scale only steering, then mix them again. This keeps
+        // straight-line thrust unchanged and avoids weakening ascent/descent.
+        const float throttle = (left + right) * 0.5f;
+        const float steering = (left - right) * 0.5f;
+        const float steering_scale =
+            CONFIG_BLIMP_STEERING_SENSITIVITY_PERCENT / 100.0f;
+        s_output.left = clampf(throttle + steering * steering_scale, -1, 1);
+        s_output.right = clampf(throttle - steering * steering_scale, -1, 1);
         s_output.left_tilt = clampf(left_tilt, 0, 180);
         s_output.right_tilt = clampf(right_tilt, 0, 180);
         s_last_control_us = esp_timer_get_time();

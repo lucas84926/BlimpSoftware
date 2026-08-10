@@ -25,6 +25,14 @@ menu "Example Configuration"
             IMX219 on the tested carrier needs 24 MHz on GPIO20. The tested
             OV5647 setup supplies its own clock and therefore uses -1.
 
+    config BLIMP_CAMERA_ROTATE_180
+        bool "Rotate camera image 180 degrees"
+        default y
+        help
+            Rotate the streamed image by 180 degrees in the software demosaic
+            step. Disable this when the camera is mounted upright. The default
+            preserves the orientation used by earlier BlimpSoftware firmware.
+
     config ESP_WIFI_SSID
         string "WiFi SSID"
         default "myssid"
@@ -116,6 +124,16 @@ menu "Example Configuration"
         help
             Scale logical reverse commands for the right motor. This is applied
             before motor reversal, so reverse always means blimp reverse.
+
+    config BLIMP_STEERING_SENSITIVITY_PERCENT
+        int "Steering sensitivity (percent)"
+        range 0 100
+        default 50
+        help
+            Scale only the differential steering contribution after receiving
+            the mixed left/right motor commands. Straight-line throttle is not
+            changed. 100 preserves the original response, 50 halves steering
+            authority, and 0 disables steering.
 
     config BLIMP_LEFT_SERVO_INVERTED
         bool "Reverse left tilt servo output"
