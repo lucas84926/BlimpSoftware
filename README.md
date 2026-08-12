@@ -71,6 +71,23 @@ Tested with a DualShock4 (PS4) controller.
 | Circle | Latch E-stop |
 | Cross | Clear E-stop; motors remain stopped until a new control frame |
 
+### Axis layouts
+
+Hosts disagree about which pygame axis carries which stick, so the base station
+supports two layouts and picks one automatically at startup by checking which
+axes rest at `-1` (the triggers) while the sticks are centred.
+
+| Profile | Left stick Y | Right stick X/Y | L2/R2 |
+|---|---|---|---|
+| `legacy` | 1 | 3 / 4 | 2 / 5 |
+| `standard` | 1 | 2 / 3 | 4 / 5 |
+
+Detection needs the sticks centred and the triggers released when the
+controller is first seen. If a control feels wrong, run
+`--controller-monitor` — it prints the profile matching each sample — and pin
+the result with `--controller-profile legacy|standard` (or the
+`BLIMP_CONTROLLER_PROFILE` environment variable).
+
 ## Base station quick start
 
 Requirements are Python 3.12+, Node/npm for building the UI, and a supported controller visible to pygame.
@@ -97,6 +114,7 @@ Commandline options:
 | `--web-port PORT` | Dashboard HTTP port, default 8000 |
 | `--sim` | Simulate one blimp without UDP hardware |
 | `--no-controller` | Run without opening pygame controller input |
+| `--controller-profile NAME` | Gamepad axis layout: `auto` (default), `legacy`, or `standard` |
 | `--controller-monitor` | Print raw controller axes/buttons without commanding outputs |
 
 For frontend development:

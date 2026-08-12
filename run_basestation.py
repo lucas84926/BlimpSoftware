@@ -22,6 +22,13 @@ def main():
     parser.add_argument("--sim", action="store_true",
                         help="simulate one blimp; no ESP32 or UDP ports required")
     parser.add_argument("--no-controller", action="store_true")
+    parser.add_argument("--controller-profile",
+                        default=os.getenv("BLIMP_CONTROLLER_PROFILE", "auto"),
+                        choices=("auto", "legacy", "standard"),
+                        help="gamepad axis layout: 'legacy' puts L2 on axis 2 and "
+                             "the right stick on 3/4, 'standard' puts the right "
+                             "stick on 2/3 and the triggers on 4/5 "
+                             "(default: auto-detect at rest)")
     parser.add_argument("--controller-monitor", action="store_true",
                         help="print raw gamepad axes/buttons; sends no blimp commands")
     args = parser.parse_args()
@@ -43,7 +50,7 @@ def main():
     if not args.no_controller:
         try:
             from basestation.controller_input import ControllerReader
-            controller = ControllerReader()
+            controller = ControllerReader(profile=args.controller_profile)
         except Exception as error:
             print(f"[base] PS4 controller disabled: {error}")
     video = None if args.sim else VideoReceiver(port=args.video_port)
