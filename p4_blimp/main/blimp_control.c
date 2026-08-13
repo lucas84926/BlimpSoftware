@@ -13,6 +13,11 @@
 #define PWM_BITS LEDC_TIMER_14_BIT
 #define PWM_MAX ((1U << 14) - 1)
 #define COMMAND_TIMEOUT_US 400000
+#define CONTROL_TICK_MS 20
+// Commands arrive at roughly 30 Hz, so the ramp has to advance on its own
+// between frames; the control task ticks faster than both that and the 50 Hz
+// PWM period.
+#define THROTTLE_SLEW_PER_SEC (CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC / 100.0f)
 
 #ifdef CONFIG_BLIMP_LEFT_MOTOR_INVERTED
 #define LEFT_MOTOR_INVERTED true
@@ -39,6 +44,12 @@ static const char *TAG = "blimp_control";
 static SemaphoreHandle_t s_lock;
 static blimp_output_t s_output = {.left_tilt = 90, .right_tilt = 90};
 static int64_t s_last_control_us;
+// Arcade components kept separately so thrust can be ramped toward the request
+// while steering follows the stick immediately.
+static float s_target_throttle;
+static float s_throttle;
+static float s_steering;
+static int64_t s_last_slew_us;
 
 static float clampf(float v, float lo, float hi)
 {
@@ -96,6 +107,36 @@ static float servo_pulse(float angle, bool inverted, float neutral_angle)
     return 500.0f + calibrated_angle * (2000.0f / 180.0f);
 }
 
+// Advance the ramped throttle toward the request, then re-mix the motors.
+// Returns true when the motor commands moved and the outputs need rewriting.
+static bool advance_mix_locked(int64_t now_us)
+{
+    if (THROTTLE_SLEW_PER_SEC <= 0.0f) {
+        s_throttle = s_target_throttle;
+    } else {
+        // A stalled or first-ever tick must not grant an unbounded step.
+        float dt = (now_us - s_last_slew_us) / 1000000.0f;
+        dt = clampf(dt, 0.0f, CONTROL_TICK_MS / 1000.0f * 5.0f);
+        const float max_step = THROTTLE_SLEW_PER_SEC * dt;
+        s_throttle += clampf(s_target_throttle - s_throttle, -max_step, max_step);
+    }
+    s_last_slew_us = now_us;
+
+    const float left = clampf(s_throttle + s_steering, -1, 1);
+    const float right = clampf(s_throttle - s_steering, -1, 1);
+    const bool changed = left != s_output.left || right != s_output.right;
+    s_output.left = left;
+    s_output.right = right;
+    return changed;
+}
+
+// Cut thrust with no ramp, for E-stop and the command-timeout failsafe.
+static void stop_now_locked(void)
+{
+    s_target_throttle = s_throttle = s_steering = 0;
+    s_output.left = s_output.right = 0;
+}
+
 static void apply_locked(void)
 {
     float left = s_output.estop ? 0 : s_output.left;
@@ -117,18 +158,25 @@ static void apply_locked(void)
         CONFIG_BLIMP_RIGHT_SERVO_NEUTRAL_ANGLE));
 }
 
-static void watchdog_task(void *arg)
+static void control_task(void *arg)
 {
     while (true) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (!s_output.estop && s_last_control_us &&
-            esp_timer_get_time() - s_last_control_us > COMMAND_TIMEOUT_US) {
-            s_output.left = s_output.right = 0;
-            s_last_control_us = 0;
-            apply_locked();
+        const int64_t now = esp_timer_get_time();
+        if (!s_output.estop && s_last_control_us) {
+            if (now - s_last_control_us > COMMAND_TIMEOUT_US) {
+                stop_now_locked();
+                s_last_control_us = 0;
+                apply_locked();
+            } else if (advance_mix_locked(now)) {
+                // Keep ramping between the ~30 Hz command frames.
+                apply_locked();
+            }
+        } else {
+            s_last_slew_us = now;
         }
         xSemaphoreGive(s_lock);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(CONTROL_TICK_MS));
     }
 }
 
@@ -165,7 +213,8 @@ void blimp_control_init(void)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     apply_locked();
     xSemaphoreGive(s_lock);
-    xTaskCreate(watchdog_task, "control_watchdog", 3072, NULL, 12, NULL);
+    s_last_slew_us = esp_timer_get_time();
+    xTaskCreate(control_task, "blimp_control", 3072, NULL, 12, NULL);
     ESP_LOGI(TAG, "ESC GPIOs %d/%d, tilt GPIOs %d/%d",
              pins[0], pins[1], pins[2], pins[3]);
     ESP_LOGI(TAG, "Reversed: motors L=%d R=%d, servos L=%d R=%d",
@@ -184,6 +233,9 @@ void blimp_control_init(void)
              CONFIG_BLIMP_RIGHT_MOTOR_REVERSE_SCALE_PERCENT);
     ESP_LOGI(TAG, "Steering sensitivity: %d%%",
              CONFIG_BLIMP_STEERING_SENSITIVITY_PERCENT);
+    ESP_LOGI(TAG, "Throttle ramp: %d%%/s%s",
+             CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC,
+             CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC ? "" : " (disabled)");
 }
 
 void blimp_control_set(float left, float right, float left_tilt, float right_tilt)
@@ -200,11 +252,20 @@ void blimp_control_set(float left, float right, float left_tilt, float right_til
         const float steering = (left - right) * 0.5f;
         const float steering_scale =
             CONFIG_BLIMP_STEERING_SENSITIVITY_PERCENT / 100.0f;
-        s_output.left = clampf(throttle + steering * steering_scale, -1, 1);
-        s_output.right = clampf(throttle - steering * steering_scale, -1, 1);
+        const int64_t now = esp_timer_get_time();
+        // Thrust is only the ramp's target; the control task walks the applied
+        // value toward it. Steering is mixed in at full rate.
+        s_target_throttle = throttle;
+        s_steering = steering * steering_scale;
+        if (!s_last_control_us) {
+            // First frame after a failsafe or E-stop clear: start the ramp from
+            // the stopped state rather than crediting the idle time.
+            s_last_slew_us = now;
+        }
+        advance_mix_locked(now);
         s_output.left_tilt = clampf(left_tilt, 0, 180);
         s_output.right_tilt = clampf(right_tilt, 0, 180);
-        s_last_control_us = esp_timer_get_time();
+        s_last_control_us = now;
         apply_locked();
     }
     xSemaphoreGive(s_lock);
@@ -214,7 +275,7 @@ void blimp_control_estop(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_output.estop = true;
-    s_output.left = s_output.right = 0;
+    stop_now_locked();
     s_last_control_us = 0;
     apply_locked();
     xSemaphoreGive(s_lock);
@@ -224,7 +285,7 @@ void blimp_control_clear_estop(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_output.estop = false;
-    s_output.left = s_output.right = 0;
+    stop_now_locked();
     s_last_control_us = 0;
     apply_locked();
     xSemaphoreGive(s_lock);

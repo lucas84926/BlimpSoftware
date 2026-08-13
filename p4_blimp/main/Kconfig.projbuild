@@ -135,6 +135,21 @@ menu "Example Configuration"
             changed. 100 preserves the original response, 50 halves steering
             authority, and 0 disables steering.
 
+    config BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC
+        int "Throttle ramp rate (percent of full throttle per second)"
+        range 0 2000
+        default 150
+        help
+            Limit how fast commanded thrust may change, easing the step inputs
+            that pitch the nose up and down. 150 means a stick slammed from
+            neutral to full takes about 0.7 s to get there; 300 takes about
+            0.35 s; 0 disables ramping and restores the original instant
+            response. Lower values are gentler but delay the response.
+
+            Only the throttle component is ramped, so steering stays crisp.
+            E-stop and the command-timeout failsafe still cut the motors
+            immediately and are never slowed by this setting.
+
     config BLIMP_LEFT_SERVO_INVERTED
         bool "Reverse left tilt servo output"
         default y

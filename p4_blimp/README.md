@@ -57,7 +57,7 @@ The default physical configuration reverses the left motor and left servo.
 |---|---:|---|---|
 | `app_main` / capture loop | ESP-IDF main task | Every camera frame | Startup, RAW10 capture, demosaic, JPEG encode, video dispatch |
 | `blimp_udp_rx` | 14 | Blocking UDP receive | Parse control, E-stop, clear, and ping messages |
-| `control_watchdog` | 12 | 20 ms | Stop both motors after 400 ms without a control packet |
+| `blimp_control` | 12 | 20 ms | Advance the throttle ramp; stop both motors after 400 ms without a control packet |
 | `mpu6050` | 10 | 10 ms | Read IMU and update the attitude estimate at about 100 Hz |
 | `blimp_telemetry` | 8 | 100 ms | Send actuator and attitude telemetry at 10 Hz |
 | HTTP server tasks | ESP-IDF HTTP defaults | Client-driven | Serve camera controls on port 80 and MJPEG on port 81 |
@@ -143,6 +143,7 @@ Run `idf.py -B build-local menuconfig`, then open **Example Configuration**.
 | Left motor forward/reverse scale | 100% / 100% | Logical direction compensation |
 | Right motor forward/reverse scale | 100% / 100% | Logical direction compensation |
 | Steering sensitivity | 50% | Scale differential steering without changing straight-line throttle |
+| Throttle ramp rate | 150%/s | Ease thrust changes so step inputs stop pitching the nose; 0 disables |
 | Reverse left servo | enabled | Mirrored tilt correction |
 | Reverse right servo | disabled | Mirrored tilt correction |
 | Left/right servo neutral angle | 90 degrees | Physical output at logical 90 degrees |
@@ -169,6 +170,19 @@ Left reverse:    95%       Right reverse: 100%
 ```
 
 Tune at a moderate fixed command, compare actual thrust or RPM, and adjust in one- or two-percent steps. The basestation motor bars intentionally continue to show requested logical commands; they cannot measure actual motor RPM.
+
+### Throttle ramp
+
+A step change in thrust pitches the nose up or down before the hull settles. **Throttle ramp rate** limits how fast the commanded thrust may change, in percent of full throttle per second, so the stick can be moved freely without shocking the aircraft.
+
+| Setting | Full-scale sweep takes | Feel |
+|---:|---:|---|
+| 0 | instant | Original response; nose bobs on abrupt inputs |
+| 100 | 1.0 s | Very smooth, noticeably delayed |
+| 150 | 0.7 s | Default; damps bobbing while staying responsive |
+| 300 | 0.35 s | Light smoothing only |
+
+Start at the default and lower it until the bobbing stops. Only the throttle component is ramped, so steering response is unchanged. E-stop and the 400 ms command-loss failsafe bypass the ramp and stop the motors immediately, and a ramp in progress is discarded rather than resumed when commands return.
 
 ## Servo neutral calibration
 
