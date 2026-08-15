@@ -88,6 +88,10 @@ static void command_task(void *arg)
             blimp_control_estop();
         } else if (!strcmp(type, "clear_estop")) {
             blimp_control_clear_estop();
+        } else if (!strcmp(type, "gate_open")) {
+            blimp_control_set_gate(true);
+        } else if (!strcmp(type, "gate_close")) {
+            blimp_control_set_gate(false);
         } else if (!strcmp(type, "ping")) {
             char pong[80];
             snprintf(pong, sizeof(pong), "{\"type\":\"pong\",\"n\":%.0f}",
@@ -112,9 +116,11 @@ static void telemetry_task(void *arg)
                      "{\"type\":\"telemetry\",\"from\":\"blimp\","
                      "\"estop\":%s,\"left\":%.3f,\"right\":%.3f,"
                      "\"left_tilt\":%.1f,\"right_tilt\":%.1f,"
+                     "\"gate\":%.1f,\"gate_open\":%s,"
                      "\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f}",
                      output.estop ? "true" : "false", output.left, output.right,
                      output.left_tilt, output.right_tilt,
+                     output.gate, output.gate_open ? "true" : "false",
                      attitude.roll, attitude.pitch, attitude.yaw);
             send_json_to(&base, json);
         }

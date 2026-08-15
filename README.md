@@ -17,6 +17,7 @@ The system is designed around direct human control rather than autonomous flight
 - Single-aircraft teleoperation
 - PS4 controller support with arcade-drive controls
 - Independent thrust and synchronized motor-tilt control
+- Ball-catcher gate servo with configurable open/closed angles and travel speed
 - Aircraft-side safety features including:
     - latched emergency stop
     - 400 ms command watchdog
@@ -68,6 +69,8 @@ Tested with a DualShock4 (PS4) controller.
 | Right stick up/down | Forward/reverse throttle |
 | Right stick left/right | Arcade steering across both motors |
 | Left stick up/down | Set both motor-tilt servos from 0–180 degrees |
+| L2 | Close the ball-catcher gate (capture) |
+| L1 | Open the ball-catcher gate (release) |
 | Circle | Latch E-stop |
 | Cross | Clear E-stop; motors remain stopped until a new control frame |
 
@@ -88,6 +91,33 @@ controller is first seen. If a control feels wrong, run
 the result with `--controller-profile legacy|standard` (or the
 `BLIMP_CONTROLLER_PROFILE` environment variable).
 
+L2 is read as an analog trigger from the profile's own axis, so it follows the
+detected layout. L1 is a button, and the two drivers number the shoulder
+buttons differently (4 on `legacy`, 9 on `standard`). Those defaults are
+educated guesses: press L1 under `--controller-monitor`, read the index it
+prints, and pass `--gate-release-button N` if it differs.
+
+## Finding the blimp
+
+The firmware advertises itself over mDNS, so the base station does not need the DHCP address that `idf.py monitor` prints. It publishes `blimp.local` plus a `_blimp._udp` service record carrying the command and video ports, and `--blimp-host` defaults to `blimp.local`.
+
+Resolution uses the system resolver first, which works out of the box on macOS and Windows and on Linux with `avahi-daemon` and `nss-mdns` installed. Where that is unavailable, the base station falls back to querying the service record over multicast itself, with no extra dependency. Names are retried for `--discover-timeout` seconds, so the base station may be started while the aircraft is still booting.
+
+`python run_basestation.py --list-blimps` prints every aircraft that answers, with its hostname, address, and ports. A literal IP is still accepted for `--blimp-host` and skips discovery entirely, for networks that block multicast.
+
+### Two blimps on one network
+
+`blimp.local` is **not** unique: every aircraft flashed from the same build claims that name, and the ESP mDNS responder does not rename itself on a conflict — it re-probes indefinitely, so the name resolves unpredictably. Give each aircraft its own **mDNS hostname** in menuconfig, keeping one saved config per aircraft (`p4_blimp/sdkconfig.blimp1` is the first), or enable the MAC suffix option for automatically unique names.
+
+A two-pilot setup then looks like:
+
+| | Aircraft | Base station command |
+|---|---|---|
+| Pilot 1 | `blimp.local` | `python run_basestation.py --blimp-host blimp.local` |
+| Pilot 2 | `blimp2.local` | `python run_basestation.py --blimp-host blimp2.local` |
+
+Run the two base stations on two computers. Each binds the command and video ports locally, so a single computer would need `--command-port`/`--video-port`/`--web-port` overrides and matching firmware ports. Point only one base station at a given aircraft: the blimp streams telemetry and video back to whichever address sent it the most recent packet, so two base stations commanding one blimp will fight over that return path.
+
 ## Base station quick start
 
 Requirements are Python 3.12+, Node/npm for building the UI, and a supported controller visible to pygame.
@@ -98,7 +128,7 @@ cd basestation-ui
 npm install
 npm run build
 cd ..
-python run_basestation.py --blimp-host <P4-IP> --host 0.0.0.0
+python run_basestation.py --host 0.0.0.0
 ```
 
 Open `http://localhost:8000`. The Python service serves the built dashboard, WebSocket state, and MJPEG camera bridge from the same port.
@@ -107,7 +137,9 @@ Commandline options:
 
 | Option | Purpose |
 |---|---|
-| `--blimp-host ADDRESS` | P4 address receiving UDP commands |
+| `--blimp-host ADDRESS` | P4 mDNS name or IP, default `blimp.local` |
+| `--discover-timeout SECONDS` | How long to retry mDNS resolution, default 10 |
+| `--list-blimps` | List the aircraft advertising on this network, then exit |
 | `--command-port PORT` | NDJSON command/telemetry port, default 5004 |
 | `--video-port PORT` | JPEG-fragment receiver, default 5005 |
 | `--host ADDRESS` | Dashboard bind address, default `127.0.0.1` |
@@ -115,6 +147,7 @@ Commandline options:
 | `--sim` | Simulate one blimp without UDP hardware |
 | `--no-controller` | Run without opening pygame controller input |
 | `--controller-profile NAME` | Gamepad axis layout: `auto` (default), `legacy`, or `standard` |
+| `--gate-release-button N` | pygame button index for L1, if the default guess is wrong |
 | `--controller-monitor` | Print raw controller axes/buttons without commanding outputs |
 
 For frontend development:
@@ -154,7 +187,7 @@ The repository tracks sanitized defaults in `p4_blimp/sdkconfig.defaults`; the g
 
 Keep the aircraft still, at the attitude that should read as level, for the approximately one-second gyro calibration at boot. Startup roll/pitch zeroing is enabled by default. Native/swapped attitude axes and independent roll/pitch inversion are available under **Example Configuration**. Test motor direction, servo direction, failsafe, and E-stop with the propellers removed.
 
-Open `http://<P4-IP>/` for the camera settings page. It provides runtime controls for:
+Open `http://blimp.local/` (or `http://<P4-IP>/`) for the camera settings page. It provides runtime controls for:
 
 - camera analog gain;
 - sensor exposure time;

@@ -14,6 +14,7 @@ class FleetManager:
         self._state = {
             "robot_id": blimp_id, "mode": "teleop", "estop": False,
             "left": 0.0, "right": 0.0, "left_tilt": 90.0, "right_tilt": 90.0,
+            "gate": None, "gate_open": False,
             "roll": None, "pitch": None, "yaw": None, "battery": None,
             "latency_ms": None,
         }
@@ -42,7 +43,7 @@ class FleetManager:
                     self._state["latency_ms"] = round((now - sent) * 1000)
                 return
             for key in ("estop", "left", "right", "left_tilt", "right_tilt",
-                        "roll", "pitch", "yaw", "battery"):
+                        "gate", "gate_open", "roll", "pitch", "yaw", "battery"):
                 if key in message:
                     self._state[key] = message[key]
 

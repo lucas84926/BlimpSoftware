@@ -53,6 +53,43 @@ menu "Example Configuration"
         int "BlimpSoftware UDP JPEG port"
         default 5005
 
+    config BLIMP_MDNS_ENABLE
+        bool "Advertise the blimp over mDNS"
+        default y
+        help
+            Publish <hostname>.local and a _blimp._udp service record so the
+            basestation can find the aircraft on a new network without reading
+            the DHCP address from `idf.py monitor`.
+
+    config BLIMP_MDNS_HOSTNAME
+        string "mDNS hostname"
+        depends on BLIMP_MDNS_ENABLE
+        default "blimp"
+        help
+            Published as <hostname>.local, so the default answers to
+            blimp.local. Give each aircraft its own name when flying more than
+            one on the same network.
+
+    config BLIMP_MDNS_APPEND_MAC
+        bool "Append the Wi-Fi MAC suffix to the mDNS hostname"
+        depends on BLIMP_MDNS_ENABLE
+        default n
+        help
+            Publish <hostname>-<last 3 MAC bytes>.local, for example
+            blimp-a1b2c3.local. Guarantees a unique name when several aircraft
+            are flashed from the same build, at the cost of a name you have to
+            look up with `--list-blimps` rather than one you chose. Prefer
+            giving each aircraft its own mDNS hostname; use this as a safety
+            net. Two aircraft sharing a name do not fail over: the responder
+            re-probes indefinitely and the name resolves unpredictably.
+
+    config BLIMP_MDNS_INSTANCE
+        string "mDNS service instance name"
+        depends on BLIMP_MDNS_ENABLE
+        default "BlimpSoftware blimp"
+        help
+            Human-readable name shown by service browsers.
+
     config BLIMP_LEFT_ESC_GPIO
         int "Left ESC GPIO"
         default 29
@@ -149,6 +186,66 @@ menu "Example Configuration"
             Only the throttle component is ramped, so steering stays crisp.
             E-stop and the command-timeout failsafe still cut the motors
             immediately and are never slowed by this setting.
+
+    config BLIMP_GATE_ENABLE
+        bool "Ball-catcher gate servo"
+        default y
+        help
+            Drive a third servo that opens and closes the ball catcher. The
+            base station commands it with L2 (capture) and L1 (release); the
+            servo moves between the two configured angles at the configured
+            speed.
+
+    config BLIMP_GATE_GPIO
+        int "Gate servo GPIO"
+        depends on BLIMP_GATE_ENABLE
+        range 0 54
+        default 49
+        help
+            Signal pin for the gate servo. GPIO49 is free on the reference
+            wiring: it is a general-purpose pad, outside the SDIO link to the
+            C6 (14-19, 54), the camera and IMU bus (7, 8, 20), the ESCs (28,
+            29), and the tilt servos (4, 5).
+
+    config BLIMP_GATE_CLOSED_ANGLE
+        int "Gate closed angle (captured)"
+        depends on BLIMP_GATE_ENABLE
+        range 0 180
+        default 60
+        help
+            Angle held while the catcher is closed around a ball. This is where
+            L2 drives the servo.
+
+    config BLIMP_GATE_OPEN_ANGLE
+        int "Gate open angle (released)"
+        depends on BLIMP_GATE_ENABLE
+        range 0 180
+        default 120
+        help
+            Angle held while the catcher is open. This is where L1 drives the
+            servo. Swap this with the closed angle to reverse a mirrored
+            linkage; there is no separate inversion option.
+
+    config BLIMP_GATE_SPEED_DEG_PER_SEC
+        int "Gate travel speed (degrees per second)"
+        depends on BLIMP_GATE_ENABLE
+        range 0 1000
+        default 180
+        help
+            Rate the gate sweeps between the two angles. 180 crosses a
+            60-degree throw in about a third of a second. Lower values close
+            gently on a ball; 0 commands the target angle immediately and lets
+            the servo run at its own full speed.
+
+    config BLIMP_GATE_BOOT_OPEN
+        bool "Hold the gate open at boot"
+        depends on BLIMP_GATE_ENABLE
+        default n
+        help
+            Choose the angle commanded at power-up, before any base station
+            connects. The gate keeps its position through E-stop and the
+            command-loss failsafe, so a captured ball is not dropped when the
+            link drops.
 
     config BLIMP_LEFT_SERVO_INVERTED
         bool "Reverse left tilt servo output"

@@ -22,14 +22,30 @@ class AxisProfile:
     left_y: int
     right_x: int
     right_y: int
-    triggers: tuple[int, int]
+    triggers: tuple[int, int]        # (L2, R2); L2 captures the ball
+    l1_button: int                   # releases the ball
+
+    @property
+    def l2_axis(self) -> int:
+        return self.triggers[0]
+
+
+# L2 is an analog trigger, not a button, so it is read from its axis and
+# debounced with hysteresis: press past 0.5, release below 0.0 (idle is -1).
+TRIGGER_PRESS = .5
+TRIGGER_RELEASE = 0.0
 
 
 # Drivers disagree about where the triggers sit. On "legacy" they take axes 2
 # and 5, pushing the right stick to 3/4; on "standard" they take 4 and 5 and
 # the right stick keeps 2/3.
-LEGACY_PROFILE = AxisProfile("legacy", left_y=1, right_x=3, right_y=4, triggers=(2, 5))
-STANDARD_PROFILE = AxisProfile("standard", left_y=1, right_x=2, right_y=3, triggers=(4, 5))
+# The two drivers also number the shoulder buttons differently. Confirm L1
+# with --controller-monitor, which prints the index of each button pressed,
+# and override it with --gate-release-button if this guess is wrong.
+LEGACY_PROFILE = AxisProfile("legacy", left_y=1, right_x=3, right_y=4,
+                             triggers=(2, 5), l1_button=4)
+STANDARD_PROFILE = AxisProfile("standard", left_y=1, right_x=2, right_y=3,
+                               triggers=(4, 5), l1_button=9)
 AXIS_PROFILES = {p.name: p for p in (LEGACY_PROFILE, STANDARD_PROFILE)}
 DEFAULT_PROFILE = LEGACY_PROFILE
 
@@ -53,7 +69,8 @@ def detect_profile(axes: list[float],
 
 
 class ControllerReader:
-    def __init__(self, hz: float = 30, profile: str = "auto"):
+    def __init__(self, hz: float = 30, profile: str = "auto",
+                 l1_button: int | None = None):
         if pygame is None:
             raise RuntimeError("pygame is not installed")
         if profile != "auto" and profile not in AXIS_PROFILES:
@@ -63,6 +80,8 @@ class ControllerReader:
         self.name = None
         self.requested_profile = profile
         self.profile = DEFAULT_PROFILE if profile == "auto" else AXIS_PROFILES[profile]
+        # An explicit override survives profile auto-detection.
+        self.l1_button = l1_button
         self.on_control = None  # left motor, right motor, left tilt, right tilt
         self.on_action = None
         self._running = False
@@ -91,6 +110,29 @@ class ControllerReader:
         tilt = round(90 - cls._deadzone(axis(profile.left_y)) * 90, 1)
         return left, right, tilt
 
+    @classmethod
+    def gate_action(cls, axes: list[float], buttons: list[int],
+                    profile: AxisProfile = DEFAULT_PROFILE,
+                    previous: dict | None = None,
+                    l1_button: int | None = None) -> tuple[str | None, dict]:
+        """Map L2/L1 to one gate command on the press edge.
+
+        L2 captures (closes the gate) and L1 releases (opens it). Returns the
+        action to send, if any, and the held state to pass in next time.
+        """
+        previous = previous or {}
+        value = axes[profile.l2_axis] if profile.l2_axis < len(axes) else -1.0
+        # Hysteresis keeps a trigger resting near the threshold from chattering.
+        l2 = value > (TRIGGER_RELEASE if previous.get("l2") else TRIGGER_PRESS)
+        l1 = (profile.l1_button if l1_button is None else l1_button) in buttons
+
+        action = None
+        if l2 and not previous.get("l2"):
+            action = "gate_close"
+        elif l1 and not previous.get("l1"):
+            action = "gate_open"
+        return action, {"l2": l2, "l1": l1}
+
     def start(self) -> None:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="ps4")
@@ -100,6 +142,7 @@ class ControllerReader:
         pygame.init()
         joystick = None
         previous = {}
+        gate: dict = {}
         while self._running:
             pygame.event.pump()
             if joystick is None or pygame.joystick.get_count() == 0:
@@ -121,8 +164,8 @@ class ControllerReader:
                 print(f"[base] controller: {self.name} "
                       f"(axis profile: {self.profile.name})")
             axes = [joystick.get_axis(i) for i in range(joystick.get_numaxes())]
-            # Right Y is positive downward. The trigger axes are deliberately
-            # ignored; both rest at -1 on either driver.
+            # Right Y is positive downward. R2 is unused; L2 drives the gate
+            # and is read below.
             left, right, tilt = self.control_from_axes(axes, self.profile)
             if self.on_control:
                 self.on_control(left, right, tilt, tilt)
@@ -131,6 +174,12 @@ class ControllerReader:
                 if current and not previous.get(button) and self.on_action:
                     self.on_action(action)
                 previous[button] = current
+            buttons = [i for i in range(joystick.get_numbuttons())
+                       if joystick.get_button(i)]
+            action, gate = self.gate_action(axes, buttons, self.profile,
+                                            gate, self.l1_button)
+            if action and self.on_action:
+                self.on_action(action)
             time.sleep(1 / self.hz)
 
     def stop(self) -> None:
@@ -151,6 +200,7 @@ def monitor() -> None:
     joystick.init()
     print(f"Controller: {joystick.get_name()}")
     print("Move one requested control at a time. Press Ctrl-C to stop.")
+    print("Press L1 to read off its button index for --gate-release-button.")
     try:
         while True:
             pygame.event.pump()

@@ -4,6 +4,7 @@ build-*/
 
 # Local configuration files
 sdkconfig
+sdkconfig.blimp1
 sdkconfig.old
 
 # Component Manager cache

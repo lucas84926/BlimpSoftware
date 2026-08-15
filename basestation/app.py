@@ -70,7 +70,8 @@ def build_app(fleet, link, controller=None, video_rx=None, ui_hz: float = 20):
             while True:
                 data = await ws.receive_json()
                 action = data.get("action")
-                if action in ("estop", "clear_estop"):
+                if action in ("estop", "clear_estop",
+                              "gate_open", "gate_close"):
                     send({"type": action})
         except (WebSocketDisconnect, RuntimeError):
             pass

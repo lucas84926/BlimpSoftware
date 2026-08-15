@@ -26,6 +26,7 @@
 #include "esp_http_server.h"
 #include "jpeg_enc.h"
 #include "blimp_control.h"
+#include "blimp_mdns.h"
 #include "blimp_udp.h"
 #include "mpu6050.h"
 
@@ -374,6 +375,10 @@ void app_main(void) {
 
     // Init WiFi
     wifi_init_sta();
+
+    // Start the responder right after the interface exists; it publishes the
+    // records as soon as the station obtains an address.
+    blimp_mdns_start();
 
     // Flight control is initialized stopped before any network task can run.
     blimp_control_init();

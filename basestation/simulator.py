@@ -16,6 +16,8 @@ class SimulatedBlimp:
         self._estop = False
         self._left = self._right = 0.0
         self._left_tilt = self._right_tilt = 90.0
+        self._gate_open = False
+        self._gate = 60.0
 
     def start(self) -> None:
         self._started = time.monotonic()
@@ -35,6 +37,9 @@ class SimulatedBlimp:
             self._left = self._right = 0.0
         elif kind == "clear_estop":
             self._estop = False
+        elif kind in ("gate_open", "gate_close"):
+            self._gate_open = kind == "gate_open"
+            self._gate = 120.0 if self._gate_open else 60.0
         elif kind == "ping":
             self.on_message({"type": "pong", "n": message.get("n")})
         return True
@@ -46,6 +51,7 @@ class SimulatedBlimp:
                 "type": "telemetry", "from": "blimp", "estop": self._estop,
                 "left": self._left, "right": self._right,
                 "left_tilt": self._left_tilt, "right_tilt": self._right_tilt,
+                "gate": self._gate, "gate_open": self._gate_open,
                 "roll": math.sin(t * .8) * 18,
                 "pitch": math.sin(t * .45) * 10,
                 "yaw": (t * 8) % 360,

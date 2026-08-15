@@ -57,7 +57,7 @@ The default physical configuration reverses the left motor and left servo.
 |---|---:|---|---|
 | `app_main` / capture loop | ESP-IDF main task | Every camera frame | Startup, RAW10 capture, demosaic, JPEG encode, video dispatch |
 | `blimp_udp_rx` | 14 | Blocking UDP receive | Parse control, E-stop, clear, and ping messages |
-| `blimp_control` | 12 | 20 ms | Advance the throttle ramp; stop both motors after 400 ms without a control packet |
+| `blimp_control` | 12 | 20 ms | Advance the throttle ramp and gate travel; stop both motors after 400 ms without a control packet |
 | `mpu6050` | 10 | 10 ms | Read IMU and update the attitude estimate at about 100 Hz |
 | `blimp_telemetry` | 8 | 100 ms | Send actuator and attitude telemetry at 10 Hz |
 | HTTP server tasks | ESP-IDF HTTP defaults | Client-driven | Serve camera controls on port 80 and MJPEG on port 81 |
@@ -133,10 +133,20 @@ Run `idf.py -B build-local menuconfig`, then open **Example Configuration**.
 | Wi-Fi password | `mypassword` | WPA2/WPA3 network password |
 | Command/telemetry port | 5004 | UDP NDJSON socket |
 | Video port | 5005 | UDP JPEG fragments |
+| Advertise the blimp over mDNS | enabled | Publish `<hostname>.local` and `_blimp._udp` |
+| mDNS hostname | `blimp` | Answers to `blimp.local`; must be unique per aircraft |
+| Append the Wi-Fi MAC suffix | disabled | Publish `blimp-a1b2c3.local` to guarantee uniqueness |
+| mDNS service instance name | `BlimpSoftware blimp` | Label shown by service browsers |
 | Left ESC GPIO | 29 | Left motor signal |
 | Right ESC GPIO | 28 | Right motor signal |
 | Left tilt GPIO | 5 | Left servo signal |
 | Right tilt GPIO | 4 | Right servo signal |
+| Ball-catcher gate servo | enabled | Third servo for the catcher gate/claw |
+| Gate servo GPIO | 49 | Gate signal; free on the reference wiring |
+| Gate closed angle | 60 deg | Held while a ball is captured (L2) |
+| Gate open angle | 120 deg | Held while released (L1) |
+| Gate travel speed | 180 deg/s | Sweep rate between the two angles; 0 is instant |
+| Hold the gate open at boot | disabled | Angle commanded before a base station connects |
 | Reverse left motor | enabled | Physical direction correction |
 | Reverse right motor | disabled | Physical direction correction |
 | Left/right ESC neutral | 1500 us | Per-ESC pulse that produces a complete stop |
@@ -184,6 +194,16 @@ A step change in thrust pitches the nose up or down before the hull settles. **T
 
 Start at the default and lower it until the bobbing stops. Only the throttle component is ramped, so steering response is unchanged. E-stop and the 400 ms command-loss failsafe bypass the ramp and stop the motors immediately, and a ramp in progress is discarded rather than resumed when commands return.
 
+## Ball-catcher gate
+
+A third servo opens and closes the ball catcher, on LEDC channel 5 and **Gate servo GPIO** (default 49). The pilot captures with **L2** and releases with **L1**; the firmware sweeps between **Gate closed angle** and **Gate open angle** at **Gate travel speed** rather than slamming the servo across in one step.
+
+Set the two angles to the mechanical limits of the linkage, with the closed angle just tight enough to hold a ball. Reverse a mirrored linkage by swapping the two values; unlike the tilt servos, the gate has no separate inversion or neutral calibration, because both of its positions are stated outright.
+
+Travel speed is in degrees per second: 180 crosses a 60-degree throw in about a third of a second, and lower values close more gently on a ball. 0 commands the target angle in one step and lets the servo run at its own speed.
+
+The gate is a held position, not a thrust, so it is deliberately **not** cut by E-stop or by the 400 ms command-loss failsafe: a link drop stops the motors but keeps a captured ball. It still accepts open and close commands while E-stopped. Telemetry reports the live `gate` angle and the commanded `gate_open` state.
+
 ## Servo neutral calibration
 
 The left and right **servo neutral angle** settings independently map the logical 90-degree command (centered left stick) to a physical servo output. The default is 90 degrees. If one motor pod points slightly down at center, change only that servo's neutral angle by one or two degrees, flash, and test again. Whether the value needs to increase or decrease depends on horn mounting.
@@ -205,11 +225,25 @@ idf.py flash monitor
 
 On a clean checkout, the first configure/build downloads the managed components declared in `main/idf_component.yml`. The resulting `managed_components/` and `build/` directories are generated and intentionally ignored.
 
-After `Got IP:` appears, start the base station from the repository root:
+Once the firmware logs `Advertising blimp.local`, start the base station from the repository root. There is no need to read the IP out of the monitor:
 
 ```bash
-python run_basestation.py --blimp-host <P4-IP> --host 0.0.0.0
+python run_basestation.py --host 0.0.0.0
 ```
+
+`--blimp-host` defaults to `blimp.local` and the address is resolved at startup. Pass a literal IP to skip discovery, which is also the fallback if mDNS is blocked on the network.
+
+### Flashing a second aircraft
+
+Every blimp flashed from the same build answers to the same name, and mDNS does **not** resolve that for you: this responder re-probes indefinitely on a conflict rather than renaming, so `blimp.local` becomes ambiguous. Give each aircraft its own hostname.
+
+Keep one saved configuration per aircraft — `sdkconfig.blimp1` holds the first one — and copy the file you want over `sdkconfig` before building:
+
+```bash
+cp sdkconfig.blimp1 sdkconfig && idf.py build flash
+```
+
+A saved file only carries the options that existed when it was written; anything added to Kconfig since then falls back to its default on the next `menuconfig`, so re-save after picking up new settings. Alternatively enable **Append the Wi-Fi MAC suffix**, which publishes `blimp-a1b2c3.local` from a single unmodified build; the name is then unique but unpredictable, so find it with `python run_basestation.py --list-blimps`.
 
 Then open `http://localhost:8000` on the base-station computer.
 

@@ -19,6 +19,17 @@
 // PWM period.
 #define THROTTLE_SLEW_PER_SEC (CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC / 100.0f)
 
+#if CONFIG_BLIMP_GATE_ENABLE
+#define GATE_CHANNEL LEDC_CHANNEL_5
+#define GATE_TARGET(open) ((float)((open) ? CONFIG_BLIMP_GATE_OPEN_ANGLE \
+                                          : CONFIG_BLIMP_GATE_CLOSED_ANGLE))
+#ifdef CONFIG_BLIMP_GATE_BOOT_OPEN
+#define GATE_BOOT_OPEN true
+#else
+#define GATE_BOOT_OPEN false
+#endif
+#endif
+
 #ifdef CONFIG_BLIMP_LEFT_MOTOR_INVERTED
 #define LEFT_MOTOR_INVERTED true
 #else
@@ -50,6 +61,13 @@ static float s_target_throttle;
 static float s_throttle;
 static float s_steering;
 static int64_t s_last_slew_us;
+#if CONFIG_BLIMP_GATE_ENABLE
+// The gate is a position, not a thrust: it is held through E-stop and the
+// command-loss failsafe so a captured ball is not dropped.
+static bool s_gate_open = GATE_BOOT_OPEN;
+static float s_gate_angle;
+static int64_t s_last_gate_us;
+#endif
 
 static float clampf(float v, float lo, float hi)
 {
@@ -130,6 +148,29 @@ static bool advance_mix_locked(int64_t now_us)
     return changed;
 }
 
+#if CONFIG_BLIMP_GATE_ENABLE
+// Step the gate toward its commanded angle. Returns true when it moved.
+static bool advance_gate_locked(int64_t now_us)
+{
+    const float target = GATE_TARGET(s_gate_open);
+    if (s_gate_angle == target) {
+        s_last_gate_us = now_us;
+        return false;
+    }
+    if (CONFIG_BLIMP_GATE_SPEED_DEG_PER_SEC <= 0) {
+        s_gate_angle = target;
+    } else {
+        float dt = (now_us - s_last_gate_us) / 1000000.0f;
+        dt = clampf(dt, 0.0f, CONTROL_TICK_MS / 1000.0f * 5.0f);
+        const float max_step = CONFIG_BLIMP_GATE_SPEED_DEG_PER_SEC * dt;
+        s_gate_angle += clampf(target - s_gate_angle, -max_step, max_step);
+    }
+    s_last_gate_us = now_us;
+    s_output.gate = s_gate_angle;
+    return true;
+}
+#endif
+
 // Cut thrust with no ramp, for E-stop and the command-timeout failsafe.
 static void stop_now_locked(void)
 {
@@ -156,26 +197,49 @@ static void apply_locked(void)
     set_pulse(LEDC_CHANNEL_4, servo_pulse(
         s_output.right_tilt, RIGHT_SERVO_INVERTED,
         CONFIG_BLIMP_RIGHT_SERVO_NEUTRAL_ANGLE));
+#if CONFIG_BLIMP_GATE_ENABLE
+    // The gate angles are set explicitly in Kconfig, so it needs neither the
+    // neutral calibration nor the inversion the tilt servos use.
+    set_pulse(GATE_CHANNEL, servo_pulse(s_output.gate, false, 90.0f));
+#endif
+}
+
+// One 20 ms slice of output maintenance: advance the gate travel and the
+// throttle ramp, and enforce the command-loss failsafe. Split from the task
+// loop so it can be stepped directly with a simulated clock.
+static void control_tick(int64_t now)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool dirty = false;
+#if CONFIG_BLIMP_GATE_ENABLE
+    // Runs outside the estop/timeout guard below: the gate is a held position
+    // and must finish its travel either way.
+    dirty = advance_gate_locked(now);
+#endif
+    if (!s_output.estop && s_last_control_us) {
+        if (now - s_last_control_us > COMMAND_TIMEOUT_US) {
+            stop_now_locked();
+            s_last_control_us = 0;
+            apply_locked();
+            dirty = false;
+        } else if (advance_mix_locked(now)) {
+            // Keep ramping between the ~30 Hz command frames.
+            dirty = true;
+        }
+    } else {
+        s_last_slew_us = now;
+    }
+    if (dirty) {
+        apply_locked();
+    }
+    xSemaphoreGive(s_lock);
 }
 
 static void control_task(void *arg)
 {
+    (void)arg;
     while (true) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        const int64_t now = esp_timer_get_time();
-        if (!s_output.estop && s_last_control_us) {
-            if (now - s_last_control_us > COMMAND_TIMEOUT_US) {
-                stop_now_locked();
-                s_last_control_us = 0;
-                apply_locked();
-            } else if (advance_mix_locked(now)) {
-                // Keep ramping between the ~30 Hz command frames.
-                apply_locked();
-            }
-        } else {
-            s_last_slew_us = now;
-        }
-        xSemaphoreGive(s_lock);
+        control_tick(esp_timer_get_time());
         vTaskDelay(pdMS_TO_TICKS(CONTROL_TICK_MS));
     }
 }
@@ -193,15 +257,29 @@ void blimp_control_init(void)
         .clk_cfg = LEDC_USE_PLL_DIV_CLK,
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer));
+#if CONFIG_BLIMP_GATE_ENABLE
+    // Boot straight to the configured angle; there is nothing to sweep from.
+    s_gate_angle = s_output.gate = GATE_TARGET(GATE_BOOT_OPEN);
+    s_output.gate_open = s_gate_open;
+#endif
     const int pins[] = {CONFIG_BLIMP_LEFT_ESC_GPIO, CONFIG_BLIMP_RIGHT_ESC_GPIO,
-                        CONFIG_BLIMP_LEFT_TILT_GPIO, CONFIG_BLIMP_RIGHT_TILT_GPIO};
+                        CONFIG_BLIMP_LEFT_TILT_GPIO, CONFIG_BLIMP_RIGHT_TILT_GPIO,
+#if CONFIG_BLIMP_GATE_ENABLE
+                        CONFIG_BLIMP_GATE_GPIO,
+#endif
+    };
     const float initial_pulses[] = {CONFIG_BLIMP_LEFT_ESC_NEUTRAL_US,
                                     CONFIG_BLIMP_RIGHT_ESC_NEUTRAL_US,
                                     servo_pulse(90.0f, LEFT_SERVO_INVERTED,
                                         CONFIG_BLIMP_LEFT_SERVO_NEUTRAL_ANGLE),
                                     servo_pulse(90.0f, RIGHT_SERVO_INVERTED,
-                                        CONFIG_BLIMP_RIGHT_SERVO_NEUTRAL_ANGLE)};
-    for (int i = 0; i < 4; ++i) {
+                                        CONFIG_BLIMP_RIGHT_SERVO_NEUTRAL_ANGLE),
+#if CONFIG_BLIMP_GATE_ENABLE
+                                    servo_pulse(GATE_TARGET(GATE_BOOT_OPEN),
+                                                false, 90.0f),
+#endif
+    };
+    for (int i = 0; i < (int)(sizeof(pins) / sizeof(pins[0])); ++i) {
         ledc_channel_config_t channel = {
             .gpio_num = pins[i], .speed_mode = LEDC_LOW_SPEED_MODE,
             .channel = (ledc_channel_t)(LEDC_CHANNEL_1 + i),
@@ -214,6 +292,9 @@ void blimp_control_init(void)
     apply_locked();
     xSemaphoreGive(s_lock);
     s_last_slew_us = esp_timer_get_time();
+#if CONFIG_BLIMP_GATE_ENABLE
+    s_last_gate_us = s_last_slew_us;
+#endif
     xTaskCreate(control_task, "blimp_control", 3072, NULL, 12, NULL);
     ESP_LOGI(TAG, "ESC GPIOs %d/%d, tilt GPIOs %d/%d",
              pins[0], pins[1], pins[2], pins[3]);
@@ -236,6 +317,14 @@ void blimp_control_init(void)
     ESP_LOGI(TAG, "Throttle ramp: %d%%/s%s",
              CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC,
              CONFIG_BLIMP_THROTTLE_SLEW_PERCENT_PER_SEC ? "" : " (disabled)");
+#if CONFIG_BLIMP_GATE_ENABLE
+    ESP_LOGI(TAG, "Gate servo GPIO %d: closed %d deg, open %d deg, %d deg/s, "
+             "booting %s", CONFIG_BLIMP_GATE_GPIO, CONFIG_BLIMP_GATE_CLOSED_ANGLE,
+             CONFIG_BLIMP_GATE_OPEN_ANGLE, CONFIG_BLIMP_GATE_SPEED_DEG_PER_SEC,
+             GATE_BOOT_OPEN ? "open" : "closed");
+#else
+    ESP_LOGI(TAG, "Gate servo disabled");
+#endif
 }
 
 void blimp_control_set(float left, float right, float left_tilt, float right_tilt)
@@ -269,6 +358,23 @@ void blimp_control_set(float left, float right, float left_tilt, float right_til
         apply_locked();
     }
     xSemaphoreGive(s_lock);
+}
+
+void blimp_control_set_gate(bool open)
+{
+#if CONFIG_BLIMP_GATE_ENABLE
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (open != s_gate_open) {
+        s_gate_open = open;
+        s_output.gate_open = open;
+        // Start the sweep from now rather than crediting the idle time since
+        // the last move, which would jump the servo on the first tick.
+        s_last_gate_us = esp_timer_get_time();
+    }
+    xSemaphoreGive(s_lock);
+#else
+    (void)open;
+#endif
 }
 
 void blimp_control_estop(void)
